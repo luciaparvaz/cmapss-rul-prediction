@@ -49,16 +49,42 @@ Referencias:
     referencia como "NASA/TM-2014-218496", un identificador de informe
     que no corresponde a ningún documento real verificable. La cita
     correcta es la de IJPHM anterior.)
+
+EXTENSIÓN (Fase 1 extendida, sept. 2026): soporte para los 4 subdatasets.
+  FD001/FD003 operan a UNA condición operacional (Sea Level) -> el
+  GlobalMinMaxScaler de arriba (fit solo en train, sin reajuste en test)
+  es correcto tal cual.
+  FD002/FD004 combinan SEIS condiciones operacionales distintas (altitud,
+  Mach, TRA — ver archive/readme.txt). Normalizar esos dos subdatasets
+  con un único scaler global mezclaría en la misma escala mediciones que
+  son fisicamente distintas por régimen (p.ej. una temperatura a
+  crucero y la misma temperatura a nivel del mar no son comparables sin
+  antes des-correlacionar el efecto de la condición operacional). La
+  práctica estándar en la literatura (Ramasso & Saxena, 2014; Li, Ding
+  & Sun, 2018; Zheng et al., 2017) es agrupar las 3 op_settings en 6
+  regímenes vía k-means y normalizar CADA sensor DENTRO de cada régimen
+  — nunca por motor, que es precisamente el sesgo que corrigió Fase 0.
+  Ver fit_condition_clusters / fit_condition_scalers / normalize_dataset
+  más abajo. El pipeline de FD001 (usado por fase2/4/5/7) no se modifica.
 =============================================================================
 """
 
 import os
 import sys
 import warnings
+
+# joblib/loky intenta detectar el nº de núcleos físicos vía un
+# subproceso (wmic en Windows) para paralelizar KMeans; en este sandbox
+# ese subproceso falla y loky emite un warning con traceback completo
+# (inofensivo — no detiene la ejecución, exit 0). Fijar este valor evita
+# el intento de detección y el ruido en consola.
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", "4")
+
 import numpy as np
 import pandas as pd
 import joblib
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.cluster import KMeans
 
 warnings.filterwarnings("ignore")
 np.random.seed(42)
@@ -94,6 +120,7 @@ COLUMNS = (
     + [f"s{i}"  for i in range(1, 22)]
 )
 SENSOR_COLS = [f"s{i}" for i in range(1, 22)]
+OP_SETTING_COLS = [f"os{i}" for i in range(1, 4)]
 
 STD_THRESHOLD = 0.01   # umbral de varianza mínima (fase1 original)
 
@@ -101,8 +128,20 @@ STD_THRESHOLD = 0.01   # umbral de varianza mínima (fase1 original)
 # fase5 y fase7 (14 sensores tras eliminar 7 con varianza ~nula).
 # Se recalcula más abajo y se compara contra esta constante como
 # comprobación de consistencia (guardrail ante drift silencioso).
+# Válida SOLO para FD001 — cada subdataset tiene su propia lista, ver
+# select_informative_sensors(subset=...).
 INFORMATIVE_EXPECTED = ['s2', 's3', 's4', 's7', 's8', 's9', 's11', 's12',
                          's13', 's14', 's15', 's17', 's20', 's21']
+
+# Metadatos oficiales de archive/readme.txt (Saxena et al., 2008) —
+# número de condiciones operacionales y modos de fallo por subdataset.
+SUBSETS = ["FD001", "FD002", "FD003", "FD004"]
+SUBSET_META = {
+    "FD001": {"n_conditions": 1, "n_fault_modes": 1, "fault_desc": "HPC Degradation"},
+    "FD002": {"n_conditions": 6, "n_fault_modes": 1, "fault_desc": "HPC Degradation"},
+    "FD003": {"n_conditions": 1, "n_fault_modes": 2, "fault_desc": "HPC + Fan Degradation"},
+    "FD004": {"n_conditions": 6, "n_fault_modes": 2, "fault_desc": "HPC + Fan Degradation"},
+}
 
 
 # ─────────────────────────────────────────────
@@ -132,18 +171,26 @@ def load_cmapss(subset: str = "FD001", data_dir: str = DATA_DIR) -> tuple:
 # ─────────────────────────────────────────────
 
 def select_informative_sensors(train_df: pd.DataFrame,
-                                std_threshold: float = STD_THRESHOLD) -> tuple:
+                                std_threshold: float = STD_THRESHOLD,
+                                subset: str = None) -> tuple:
     """
     Descarta sensores con std ~0 en train (no aportan señal de
     degradación). El umbral y el criterio se calculan SOLO sobre train,
     nunca sobre test, para no filtrar información del test set en una
     decisión de diseño del pipeline.
+
+    El guardrail de consistencia contra INFORMATIVE_EXPECTED (usado por
+    fase2/fase5/fase7) solo es válido para FD001: pásalo explícitamente
+    en `subset` para activarlo. Para FD002-FD004 el conjunto de sensores
+    informativos es distinto (más condiciones operacionales => algunos
+    sensores que en FD001 son ruido de instrumentación pasan a tener
+    varianza real) y no debe compararse contra la lista de FD001.
     """
     stds = train_df[SENSOR_COLS].std()
     low_var     = stds[stds < std_threshold].index.tolist()
     informative = stds[stds >= std_threshold].index.tolist()
 
-    if informative != INFORMATIVE_EXPECTED:
+    if subset == "FD001" and informative != INFORMATIVE_EXPECTED:
         warnings.warn(
             "La lista de sensores informativos calculada difiere de la "
             "usada en fase2/fase5/fase7. Verifica std_threshold o si el "
@@ -244,6 +291,104 @@ def diagnose_normalization_bias(train_df: pd.DataFrame,
 
 
 # ─────────────────────────────────────────────
+# 4b. NORMALIZACIÓN POR CONDICIÓN OPERACIONAL (FD002 / FD004)
+# ─────────────────────────────────────────────
+
+def fit_condition_clusters(train_df: pd.DataFrame, n_conditions: int = 6,
+                            random_state: int = 42) -> KMeans:
+    """
+    Agrupa los 3 op_settings de train en `n_conditions` regímenes vía
+    k-means (n_conditions=6 es el valor documentado en archive/readme.txt
+    para FD002/FD004 y el usado en la literatura — Ramasso & Saxena,
+    2014; Li, Ding & Sun, 2018). Se ajusta SOLO en train, igual que el
+    scaler global de FD001/FD003: la asignación de régimen de un ciclo
+    de test se hace con este modelo ya entrenado (predict, no fit).
+    """
+    kmeans = KMeans(n_clusters=n_conditions, random_state=random_state, n_init=10)
+    kmeans.fit(train_df[OP_SETTING_COLS].values)
+    return kmeans
+
+
+def assign_conditions(df: pd.DataFrame, kmeans: KMeans) -> pd.Series:
+    """Asigna a cada fila su régimen operacional (predict, nunca fit)."""
+    return pd.Series(kmeans.predict(df[OP_SETTING_COLS].values),
+                      index=df.index, name="op_condition")
+
+
+def fit_condition_scalers(train_df: pd.DataFrame, sensor_cols: list,
+                           kmeans: KMeans) -> dict:
+    """
+    Ajusta un MinMaxScaler independiente POR RÉGIMEN operacional, cada
+    uno SOLO sobre las filas de train que caen en ese régimen. Esto es
+    distinto de normalizar por motor (el bug de la Fase 1 original): un
+    régimen agrupa ciclos de MUCHOS motores distintos que comparten
+    condición física, no la trayectoria completa de un único motor, así
+    que no hay look-ahead (ningún ciclo usa información de "su propio
+    futuro") ni fuga de la señal de degradación.
+    """
+    conditions = assign_conditions(train_df, kmeans)
+    scalers = {}
+    for cond_id in sorted(conditions.unique()):
+        mask = conditions == cond_id
+        scaler = MinMaxScaler()
+        scaler.fit(train_df.loc[mask, sensor_cols].values)
+        scalers[cond_id] = scaler
+    return scalers
+
+
+def apply_condition_scalers(df: pd.DataFrame, sensor_cols: list,
+                             kmeans: KMeans, scalers: dict) -> pd.DataFrame:
+    """Asigna régimen (predict) y aplica (transform) el scaler de ese régimen."""
+    df_scaled = df.copy()
+    conditions = assign_conditions(df, kmeans)
+    df_scaled["op_condition"] = conditions
+    for cond_id, scaler in scalers.items():
+        mask = conditions == cond_id
+        if mask.any():
+            df_scaled.loc[mask, sensor_cols] = scaler.transform(df.loc[mask, sensor_cols].values)
+    return df_scaled
+
+
+def normalize_dataset(train_df: pd.DataFrame, test_df: pd.DataFrame,
+                       sensor_cols: list, subset: str,
+                       n_conditions: int = 6, random_state: int = 42) -> tuple:
+    """
+    Dispatcher de normalización según el nº de condiciones operacionales
+    del subdataset (metadatos oficiales en SUBSET_META):
+
+      - FD001 / FD003 (1 condición) -> GlobalMinMaxScaler (fit_global_scaler).
+      - FD002 / FD004 (6 condiciones) -> un MinMaxScaler por régimen,
+        asignado vía k-means fit en train (fit_condition_scalers).
+
+    Ambas estrategias comparten el mismo principio que corrigió Fase 0:
+    todo parámetro de normalización se aprende EXCLUSIVAMENTE en train y
+    se aplica a test sin reajuste (held-out evaluation). Nunca se
+    normaliza por motor.
+
+    Retorna
+    -------
+    train_norm, test_norm, info : dict con la estrategia usada y los
+    objetos ajustados (scaler único, o kmeans + dict de scalers).
+    """
+    n_cond_meta = SUBSET_META.get(subset, {}).get("n_conditions", 1)
+
+    if n_cond_meta <= 1:
+        scaler = fit_global_scaler(train_df, sensor_cols)
+        train_norm = apply_global_scaler(train_df, sensor_cols, scaler)
+        test_norm  = apply_global_scaler(test_df,  sensor_cols, scaler)
+        info = {"strategy": "global", "scaler": scaler}
+    else:
+        kmeans = fit_condition_clusters(train_df, n_conditions=n_conditions,
+                                         random_state=random_state)
+        scalers = fit_condition_scalers(train_df, sensor_cols, kmeans)
+        train_norm = apply_condition_scalers(train_df, sensor_cols, kmeans, scalers)
+        test_norm  = apply_condition_scalers(test_df,  sensor_cols, kmeans, scalers)
+        info = {"strategy": "per_condition", "kmeans": kmeans, "scalers": scalers}
+
+    return train_norm, test_norm, info
+
+
+# ─────────────────────────────────────────────
 # 5. PIPELINE PRINCIPAL — FASE 0
 # ─────────────────────────────────────────────
 
@@ -260,7 +405,7 @@ def run_fase0():
 
     print("\n[2/5] Seleccionando sensores informativos (std >= "
           f"{STD_THRESHOLD} en train)...")
-    informative, low_var = select_informative_sensors(train_df)
+    informative, low_var = select_informative_sensors(train_df, subset="FD001")
     print(f"      Informativos ({len(informative)}): {informative}")
     print(f"      Descartados  ({len(low_var)}): {low_var}")
 
@@ -309,5 +454,104 @@ def run_fase0():
     return train_df, test_df, rul_df, train_norm, test_norm, informative, global_scaler
 
 
+# ─────────────────────────────────────────────
+# 6. PIPELINE MULTI-SUBDATASET — FD001-FD004
+# ─────────────────────────────────────────────
+
+def run_fase0_all_subsets(subsets: list = SUBSETS) -> dict:
+    """
+    Repite el preprocesado canónico para los 4 subdatasets, eligiendo
+    la estrategia de normalización correcta para cada uno según su
+    número de condiciones operacionales (normalize_dataset):
+
+      FD001, FD003 -> GlobalMinMaxScaler   (1 condición, idéntico a run_fase0)
+      FD002, FD004 -> MinMaxScaler por régimen k-means (6 condiciones)
+
+    No repite el pipeline de FD001 vía run_fase0() (para no reajustar
+    dos veces el mismo scaler); en su lugar usa normalize_dataset con
+    la misma función fit_global_scaler subyacente, así que el resultado
+    para FD001 es idéntico al de run_fase0(). Los artefactos de FD001
+    ya guardados por run_fase0() (global_sensor_scaler.pkl,
+    train/test_FD001_normalized.parquet) no se sobrescriben con
+    contenido distinto.
+
+    Retorna
+    -------
+    dict {subset: {"train_raw", "test_raw", "rul", "train_norm",
+                   "test_norm", "informative", "low_var", "norm_info"}}
+    """
+    print("\n" + "═" * 70)
+    print("  FASE 0 (extendida) — LOS 4 SUBDATASETS C-MAPSS")
+    print("═" * 70)
+
+    results = {}
+    for subset in subsets:
+        meta = SUBSET_META[subset]
+        print(f"\n── {subset} "
+              f"({meta['n_conditions']} condición(es), "
+              f"{meta['n_fault_modes']} modo(s) de fallo: {meta['fault_desc']}) "
+              + "─" * max(1, 40 - len(subset)))
+
+        train_df, test_df, rul_df = load_cmapss(subset)
+        print(f"   Train : {train_df.shape}  |  Test : {test_df.shape}  |  RUL : {rul_df.shape}"
+              f"  |  Motores train/test: {train_df['engine_id'].nunique()}/"
+              f"{test_df['engine_id'].nunique()}")
+
+        informative, low_var = select_informative_sensors(train_df, subset=subset)
+        print(f"   Sensores informativos ({len(informative)}): {informative}")
+        print(f"   Sensores descartados  ({len(low_var)}): {low_var}")
+
+        strategy = "GlobalMinMaxScaler" if meta["n_conditions"] == 1 else "MinMaxScaler por régimen (k-means, k=6)"
+        print(f"   Normalización: {strategy}, fit SOLO en train")
+        train_norm, test_norm, norm_info = normalize_dataset(
+            train_df, test_df, informative, subset=subset
+        )
+
+        if norm_info["strategy"] == "per_condition":
+            cond_counts = assign_conditions(train_df, norm_info["kmeans"]).value_counts().sort_index()
+            print(f"   Distribución de ciclos de train por régimen: {cond_counts.to_dict()}")
+            joblib.dump(norm_info["kmeans"], f"{MODEL_DIR}/condition_kmeans_{subset}.pkl")
+            joblib.dump(norm_info["scalers"], f"{MODEL_DIR}/condition_scalers_{subset}.pkl")
+        else:
+            joblib.dump(norm_info["scaler"], f"{MODEL_DIR}/global_sensor_scaler_{subset}.pkl")
+
+        train_norm.to_parquet(f"{OUTPUT_DIR}/train_{subset}_normalized.parquet", index=False)
+        test_norm.to_parquet( f"{OUTPUT_DIR}/test_{subset}_normalized.parquet",  index=False)
+        rul_df.to_parquet(    f"{OUTPUT_DIR}/RUL_{subset}.parquet",              index=False)
+        print(f"   Exportado: train/test_{subset}_normalized.parquet, RUL_{subset}.parquet")
+
+        results[subset] = {
+            "train_raw": train_df, "test_raw": test_df, "rul": rul_df,
+            "train_norm": train_norm, "test_norm": test_norm,
+            "informative": informative, "low_var": low_var,
+            "norm_info": norm_info,
+        }
+
+    print("\n" + "═" * 70)
+    print("  RESUMEN — 4 SUBDATASETS")
+    print("═" * 70)
+    summary_rows = []
+    for subset in subsets:
+        r = results[subset]
+        summary_rows.append({
+            "Subdataset": subset,
+            "Motores train": r["train_raw"]["engine_id"].nunique(),
+            "Motores test": r["test_raw"]["engine_id"].nunique(),
+            "Cond. operacionales": SUBSET_META[subset]["n_conditions"],
+            "Modos de fallo": SUBSET_META[subset]["n_fault_modes"],
+            "Sensores informativos": len(r["informative"]),
+            "Normalización": r["norm_info"]["strategy"],
+        })
+    summary_df = pd.DataFrame(summary_rows).set_index("Subdataset")
+    print(summary_df.to_string())
+    summary_df.to_csv(f"{OUTPUT_DIR}/fase0_subsets_summary.csv")
+    print("═" * 70)
+    print("  ✅ FASE 0 (4 subdatasets) COMPLETADA")
+    print("═" * 70 + "\n")
+
+    return results
+
+
 if __name__ == "__main__":
     run_fase0()
+    run_fase0_all_subsets()

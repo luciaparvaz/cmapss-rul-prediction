@@ -8,6 +8,17 @@ a lo largo del ciclo de vida de los motores, identificar los sensores más
 discriminativos y comparar el comportamiento entre FD001 (1 modo de fallo)
 y FD003 (2 modos de fallo).
 
+CORRECCIÓN (sept. 2026): esta fase apuntaba a "/home/claude/cmapss/..."
+(rutas del sandbox original donde se desarrolló el proyecto), inexistentes
+en este repositorio, y redefinía su propio loader CSV y su propia lista de
+sensores informativos en vez de reutilizar fase0_preprocesado.py — el
+mismo problema que motivó la reescritura de Fase 0/1/2. Se corrige aquí
+con el mismo patrón: rutas relativas a la raíz del proyecto, y
+load_cmapss/INFORMATIVE_EXPECTED importados de Fase 0 en vez de
+reimplementados. La lógica de análisis en sí (correlaciones, spaghetti
+plots, curvas de degradación) usa datos CRUDOS, no normalizados — no está
+afectada por el bug de normalización per-motor que corrigió Fase 0.
+
 Visualizaciones producidas:
   f3_01_spaghetti_plots.png     — Trayectorias de degradación por sensor
   f3_02_correlation_heatmap.png — Correlación sensores × sensores × RUL
@@ -16,13 +27,25 @@ Visualizaciones producidas:
   f3_05_fd001_vs_fd003.png      — Comparativa FD001 vs FD003
 
 Referencias:
-  - Saxena et al. (2008) — Paper original C-MAPSS, PHM08
-  - Ramasso & Saxena (2014) — NASA/TM-2014-218496
-  - Li et al. (2018) — Reliability Eng. & System Safety, 172, 1-11
+  - Saxena, A., Goebel, K., Simon, D., & Eklund, N. (2008). Damage
+    propagation modeling for aircraft engine run-to-failure simulation.
+    PHM 2008, Denver, CO.
+  - Ramasso, E., & Saxena, A. (2014). Performance benchmarking and
+    analysis of prognostic methods for CMAPSS datasets. International
+    Journal of Prognostics and Health Management, 5(2).
+    DOI: 10.36001/ijphm.2014.v5i2.2236
+    (Nota: la versión original de este script citaba erróneamente esta
+    referencia como "NASA/TM-2014-218496", un identificador de informe
+    que no corresponde a ningún documento real verificable — mismo error
+    ya corregido en fase0_preprocesado.py.)
+  - Li, X., Ding, Q., & Sun, J.-Q. (2018). Remaining useful life
+    estimation in prognostics using deep convolution neural networks.
+    Reliability Engineering & System Safety, 172, 1-11.
 =============================================================================
 """
 
 import os
+import sys
 import warnings
 import numpy as np
 import pandas as pd
@@ -37,19 +60,25 @@ from scipy.stats import pearsonr, spearmanr
 warnings.filterwarnings('ignore')
 np.random.seed(42)
 
-# ─────────────────────────────────────────────
-# CONFIGURACIÓN
-# ─────────────────────────────────────────────
-DATA_DIR   = "/home/claude/cmapss/data"
-OUTPUT_DIR = "/home/claude/cmapss/outputs"
-FIG_DIR    = "/home/claude/cmapss/figures"
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
 
-COLUMNS = (["engine_id","cycle"]
-           + [f"os{i}" for i in range(1,4)]
-           + [f"s{i}"  for i in range(1,22)])
+# ─────────────────────────────────────────────
+# CONFIGURACIÓN — rutas y funciones reutilizadas de Fase 0 (fuente única
+# de verdad para carga de datos y selección de sensores informativos)
+# ─────────────────────────────────────────────
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+import fase0_preprocesado as f0
 
-INFORMATIVE = ['s2','s3','s4','s7','s8','s9','s11','s12',
-               's13','s14','s15','s17','s20','s21']
+DATA_DIR   = f0.DATA_DIR
+OUTPUT_DIR = f0.OUTPUT_DIR
+FIG_DIR    = f0.FIG_DIR
+
+COLUMNS = f0.COLUMNS
+
+INFORMATIVE = f0.INFORMATIVE_EXPECTED
 
 SENSOR_LABELS = {
     's2':  'T24 — Temp. LPC outlet',
@@ -105,8 +134,11 @@ RUL_CAP = 125
 # ─────────────────────────────────────────────
 
 def load_raw(subset):
-    df = pd.read_csv(f"{DATA_DIR}/train_{subset}.txt",
-                     sep=r"\s+", header=None, names=COLUMNS)
+    """Carga train crudo (sin normalizar) vía f0.load_cmapss — no
+    reimplementa el parseo de columnas, ya centralizado en Fase 0 — y le
+    añade las columnas derivadas (RUL, early_failure, life_pct) que
+    necesita el análisis de esta fase."""
+    df, _test_df, _rul_df = f0.load_cmapss(subset)
     df["rul_raw"] = df.groupby("engine_id")["cycle"].transform("max") - df["cycle"]
     df["RUL"]     = df["rul_raw"].clip(upper=RUL_CAP)
     df["early_failure"] = (df["rul_raw"] <= 30).astype(int)
@@ -175,22 +207,28 @@ def plot_spaghetti(train_df, save_path=None):
             pad=5, fontsize=9
         )
 
-    # Colorbar global
-    sm = plt.cm.ScalarMappable(cmap=cmap,
-                               norm=mcolors.Normalize(vmin=0, vmax=RUL_CAP))
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=axes_flat, orientation="horizontal",
-                        fraction=0.02, pad=0.03, aspect=50)
-    cbar.set_label("RUL restante (ciclos) — verde: sano  |  rojo: fallo inminente",
-                   fontsize=10)
-
     fig.suptitle(
         "Trayectorias de degradación por sensor — NASA C-MAPSS FD001\n"
         f"Muestra de {n_motors_plot} motores | Eje X invertido | "
         "Top-8 sensores por correlación con RUL",
-        fontsize=12, fontweight="bold", y=1.005
+        fontsize=12, fontweight="bold", y=1.01
     )
-    plt.tight_layout()
+    # tight_layout PRIMERO, reservando la franja inferior para la
+    # colorbar: añadirla antes (como hacía la versión original) hace que
+    # tight_layout recoloque los ejes sin contar con el espacio ya
+    # ocupado por la colorbar, y esta termina solapando la fila inferior
+    # de subplots.
+    plt.tight_layout(rect=[0, 0.035, 1, 1])
+
+    # Colorbar global, en su propio eje reservado bajo la rejilla 4x2
+    sm = plt.cm.ScalarMappable(cmap=cmap,
+                               norm=mcolors.Normalize(vmin=0, vmax=RUL_CAP))
+    sm.set_array([])
+    cbar_ax = fig.add_axes([0.15, 0.008, 0.7, 0.015])
+    cbar = fig.colorbar(sm, cax=cbar_ax, orientation="horizontal")
+    cbar.set_label("RUL restante (ciclos) — verde: sano  |  rojo: fallo inminente",
+                   fontsize=10)
+
     if save_path:
         plt.savefig(save_path, bbox_inches="tight", dpi=150)
         print(f"  ✓ Guardado: {save_path}")
@@ -551,6 +589,9 @@ def print_eda_summary(train_df):
     Calcula y reporta métricas estadísticas de la EDA:
     correlaciones Pearson y Spearman, punto de inicio de degradación,
     y análisis de varianza inter- vs intra-motor.
+
+    Devuelve (corr_df, onset_df) — no solo imprime — para que Fase 6
+    pueda exportarlos a CSV y citarlos sin reconstruir este cálculo.
     """
     print("\n" + "─"*60)
     print("ANÁLISIS ESTADÍSTICO — FASE 3")
@@ -559,16 +600,20 @@ def print_eda_summary(train_df):
     # Correlaciones con RUL
     print("\n[1] Correlación con RUL_raw (Pearson y Spearman):")
     print(f"    {'Sensor':<6} {'Pearson r':>12} {'Spearman ρ':>12} {'Señal':>10}")
+    corr_rows = []
     for s in INFORMATIVE:
         r_p, _ = pearsonr(train_df[s], train_df["rul_raw"])
         r_s, _ = spearmanr(train_df[s], train_df["rul_raw"])
         signal  = "ALTA" if abs(r_p) > 0.6 else ("MEDIA" if abs(r_p) > 0.3 else "BAJA")
         print(f"    {s:<6} {r_p:>12.4f} {r_s:>12.4f} {signal:>10}")
+        corr_rows.append({"sensor": s, "pearson_r": r_p, "spearman_rho": r_s, "señal": signal})
+    corr_df = pd.DataFrame(corr_rows)
 
     # Punto de inicio de degradación
     print("\n[2] Punto de inicio de degradación observable (por sensor):")
     print("    (RUL a partir del cual la señal supera 2σ del valor basal)")
     baseline_mask = train_df["rul_raw"] > 200   # fase sana
+    onset_rows = []
     for s in ['s11','s4','s12','s7','s3']:
         base_mean = train_df.loc[baseline_mask, s].mean()
         base_std  = train_df.loc[baseline_mask, s].std()
@@ -583,7 +628,9 @@ def print_eda_summary(train_df):
             seg_mean = train_df.loc[mask, s].mean()
             if seg_mean > threshold_above or seg_mean < threshold_below:
                 print(f"    {s:<6}: degradación observable a RUL ≈ {rul_threshold} ciclos")
+                onset_rows.append({"sensor": s, "rul_onset": rul_threshold})
                 break
+    onset_df = pd.DataFrame(onset_rows)
 
     # Varianza intra vs inter motor
     print("\n[3] Varianza intra-motor vs inter-motor (ANOVA one-way):")
@@ -596,6 +643,8 @@ def print_eda_summary(train_df):
         ss_within  = sum(((g - g.mean())**2).sum() for g in groups)
         ratio      = ss_between / (ss_within + 1e-10)
         print(f"    {s:<6}: SS_between/SS_within = {ratio:.4f}")
+
+    return corr_df, onset_df
 
 
 # ─────────────────────────────────────────────
@@ -634,19 +683,22 @@ def run_fase3():
         save_path=f"{FIG_DIR}/f3_04_degradation_phases.png")
 
     # ── 6. Comparativa FD001 vs FD003 ──
-    # Necesita train_FD003.txt — lo copiamos si está disponible
-    fd003_staged = "/mnt/user-data/uploads/PROYECT_04/archive/train_FD003.txt"
-    fd003_dest   = f"{DATA_DIR}/train_FD003.txt"
-    if os.path.exists(fd003_staged) and not os.path.exists(fd003_dest):
-        import shutil
-        shutil.copy(fd003_staged, fd003_dest)
-
+    # train_FD003.txt ya vive en archive/ (DATA_DIR = f0.DATA_DIR) junto
+    # con el resto de subdatasets — no hace falta copiarlo desde ningún
+    # staging externo, como sí requería el entorno de desarrollo original.
     print("\n[6/6] Generando comparativa FD001 vs FD003...")
     plot_fd001_vs_fd003(
         save_path=f"{FIG_DIR}/f3_05_fd001_vs_fd003.png")
 
     # ── Análisis estadístico textual ──
-    print_eda_summary(train_df)
+    corr_df, onset_df = print_eda_summary(train_df)
+
+    print("\n[Export] Guardando correlaciones y onset de degradación "
+          "(para que Fase 6 no los recalcule)...")
+    corr_df.sort_values("pearson_r", key=abs, ascending=False).to_csv(
+        f"{OUTPUT_DIR}/fase3_correlaciones_rul.csv", index=False)
+    onset_df.to_csv(f"{OUTPUT_DIR}/fase3_onset_degradacion.csv", index=False)
+    print(f"      fase3_correlaciones_rul.csv, fase3_onset_degradacion.csv")
 
     # ── Resumen ──
     life = train_df.groupby("engine_id")["cycle"].max()

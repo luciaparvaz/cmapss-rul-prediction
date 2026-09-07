@@ -1,0 +1,5 @@
+Subdataset,Motores train,Motores test,Ciclos train,Ciclos test,Cond. operacionales,Modos de fallo,Vida media (ciclos),Vida std,Nulos (train+test),Sensores informativos,Sensores descartados,Normalización
+FD001,100,100,20631,13096,1,1,206.3,46.3,0,14,7,global
+FD002,260,259,53759,33991,6,1,206.8,46.8,0,20,1,per_condition
+FD003,100,100,24720,16596,1,2,247.2,86.5,0,15,6,global
+FD004,249,248,61249,41214,6,2,246.0,73.1,0,20,1,per_condition

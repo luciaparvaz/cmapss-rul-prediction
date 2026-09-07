@@ -1,0 +1,5 @@
+modelo,cv_rmse_este_run,cv_rmse_readme,test_rmse_este_run,test_rmse_readme,test_r2_este_run,test_r2_readme
+Ridge,16.392,15.62,14.929,14.78,0.8612,0.864
+RandomForest,12.874,13.8,11.043,13.69,0.9241,0.883
+XGBoost,12.681,12.93,11.318,12.8,0.9202,0.898
+LightGBM,12.737,12.9,12.054,13.51,0.9095,0.886

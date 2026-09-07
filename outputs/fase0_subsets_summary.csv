@@ -1,0 +1,5 @@
+Subdataset,Motores train,Motores test,Cond. operacionales,Modos de fallo,Sensores informativos,Normalización
+FD001,100,100,1,1,14,global
+FD002,260,259,6,1,20,per_condition
+FD003,100,100,1,2,15,global
+FD004,249,248,6,2,20,per_condition
