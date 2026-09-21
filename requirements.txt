@@ -1,0 +1,17 @@
+# Versiones exactas verificadas end-to-end contra este pipeline (train.py).
+# Python 3.12+. Instalar en un entorno virtual dedicado:
+#   python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.txt
+#
+# Nota de compatibilidad: xgboost>=2.1.3 combinado con scikit-learn>=1.6 tiene
+# un bug conocido (AttributeError en __sklearn_tags__ al envolver XGBRegressor
+# en un sklearn.Pipeline) que aquí se resuelve fijando ambos a versiones donde
+# ya está corregido. No bajar xgboost de 3.x sin volver a verificar ese punto.
+numpy==2.5.3
+pandas==3.0.6
+scikit-learn==1.9.1
+scipy==1.18.1
+xgboost==3.4.1
+lightgbm==4.7.0
+shap==0.52.0
+matplotlib==3.11.2
+joblib==1.6.0
