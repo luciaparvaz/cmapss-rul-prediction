@@ -8,6 +8,8 @@
 🌐 **Versión en español: [`../README.md`](../README.md)** — canonical version; this English
 mirror follows the same pipeline and reports the same run's real numbers.
 
+![Model comparison vs. baselines and predicted vs. actual RUL — official test set, LightGBM](figures/f06_test_evaluation.png)
+
 ---
 
 ## How to read this README

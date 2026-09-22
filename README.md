@@ -7,6 +7,8 @@
 
 🌐 **English version: [`english/README.md`](english/README.md)** — full mirror (code, docs), run end to end and reproducing the same numbers.
 
+![Model comparison vs. baselines and predicted vs. actual RUL — official test set, LightGBM](figures/f06_test_evaluation.png)
+
 ---
 
 ## Cómo leer este README
