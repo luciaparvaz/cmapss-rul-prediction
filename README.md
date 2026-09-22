@@ -5,6 +5,8 @@
 **Dataset:** NASA C-MAPSS FD001 (Commercial Modular Aero-Propulsion System Simulation)
 **Objetivo:** Predecir la Vida Útil Restante (RUL) de motores turbofan a partir de series temporales de 21 sensores.
 
+🌐 **English version: [`english/README.md`](english/README.md)** — full mirror (code, docs), run end to end and reproducing the same numbers.
+
 ---
 
 ## Cómo leer este README

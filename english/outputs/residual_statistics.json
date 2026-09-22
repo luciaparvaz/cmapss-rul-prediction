@@ -1,0 +1,14 @@
+{
+  "breusch_pagan_by_engine": {
+    "lm_stat": 1.594038904280917,
+    "lm_pvalue": 0.2067500348953555,
+    "f_stat": 1.5866353156459034,
+    "f_pvalue": 0.21117622958398652,
+    "n_engines": 89
+  },
+  "ljung_box_frac_engines_autocorrelated": 0.925,
+  "note": "Tests computed only on cycles with rul_true_traj<=RUL_CAP (excludes the capped segment and the censored engines); see comment in train.py",
+  "n_cycles_used": 5144,
+  "n_cycles_total": 13096,
+  "n_engines_used": 89
+}
