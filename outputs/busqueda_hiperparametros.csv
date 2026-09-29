@@ -1,0 +1,5 @@
+modelo,cv_rmse_search,mejores_params
+Ridge,15.157485961914062,"{""model__alpha"": 5.908361216819946}"
+RandomForest,10.893331564548173,"{""model__max_depth"": 17, ""model__max_features"": 0.22799939792816926, ""model__min_samples_leaf"": 5, ""model__n_estimators"": 94}"
+XGBoost,10.916865730285645,"{""model__colsample_bytree"": 0.9754210836063001, ""model__learning_rate"": 0.020101239559331862, ""model__max_depth"": 6, ""model__n_estimators"": 426, ""model__reg_alpha"": 0.30874075481385826, ""model__reg_lambda"": 1.7233063209765618, ""model__subsample"": 0.6028265220878869}"
+LightGBM,10.828888349180488,"{""model__colsample_bytree"": 0.6849356442713105, ""model__learning_rate"": 0.04363724573692308, ""model__min_child_samples"": 30, ""model__n_estimators"": 310, ""model__num_leaves"": 72, ""model__reg_alpha"": 0.2623782158161189, ""model__reg_lambda"": 1.3638900372842315, ""model__subsample"": 0.7164916560792167}"

@@ -1,0 +1,36 @@
+{
+  "informative_sensors": [
+    "s2",
+    "s3",
+    "s4",
+    "s7",
+    "s8",
+    "s9",
+    "s11",
+    "s12",
+    "s13",
+    "s14",
+    "s15",
+    "s17",
+    "s20",
+    "s21"
+  ],
+  "sensors_dropped_by_variance": [
+    "s1",
+    "s5",
+    "s6",
+    "s10",
+    "s16",
+    "s18",
+    "s19"
+  ],
+  "windows_chosen_by_cv": [
+    30,
+    50
+  ],
+  "s14_kept_by_cv": true,
+  "n_features_final": 112,
+  "winning_model_by_cv": "LightGBM",
+  "censored_test_engines": 11,
+  "total_time_seconds": 2557.3
+}

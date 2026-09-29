@@ -1,0 +1,36 @@
+{
+  "sensores_informativos": [
+    "s2",
+    "s3",
+    "s4",
+    "s7",
+    "s8",
+    "s9",
+    "s11",
+    "s12",
+    "s13",
+    "s14",
+    "s15",
+    "s17",
+    "s20",
+    "s21"
+  ],
+  "sensores_descartados_por_varianza": [
+    "s1",
+    "s5",
+    "s6",
+    "s10",
+    "s16",
+    "s18",
+    "s19"
+  ],
+  "ventanas_elegidas_por_cv": [
+    30,
+    50
+  ],
+  "s14_conservado_por_cv": true,
+  "n_features_final": 112,
+  "modelo_ganador_por_cv": "LightGBM",
+  "motores_test_censurados": 11,
+  "tiempo_total_segundos": 1514.5
+}
