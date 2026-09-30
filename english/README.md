@@ -281,7 +281,9 @@ statistic.
   above, not a real property of the model.
 - **Autocorrelation (Ljung-Box, not Durbin-Watson):** on residuals **centered per
   engine** (each engine's mean bias artificially inflated the original DW statistic),
-  same RUL<=125 filter. 92.5% of engines show significant autocorrelation (lag=10) —
+  same RUL<=125 filter. 92.5% of the engines tested (74 of 80) show significant
+  autocorrelation (lag=10); the other 9 of the 89 engines have ≤11 cycles with
+  RUL<=125, too few for a lag-10 Ljung-Box, and `ljung_box_by_engine` skips them —
   unlike heteroscedasticity, this holds after the filter and is an expected result: a
   memoryless tree ensemble on a monotonic degradation trajectory. A sequential model
   (LSTM, TCN) or an autoregressive residual correction could exploit that structure; it
@@ -328,9 +330,12 @@ python train.py
 
 A single command runs the whole pipeline: loading, CV ablations, hyperparameter search,
 final training, test evaluation, statistical block, model saving (with verification that
-they reload and reproduce the test RMSE), and figures. On the Spanish version of this
-same pipeline (identical code, same seeds, full parallelism `n_jobs=-1`), a real run on
-this machine measured **~19 minutes on CPU**, of which ~8.4 min were RandomForest's
+they reload and reproduce the test RMSE), and figures. The run that produced the current
+Spanish `outputs/` took **~25 minutes on CPU** (1514.5 s, `tiempo_total_segundos` in
+`outputs/resumen_pipeline.json`); this English version's run took ~43 minutes (2557.3 s,
+`total_time_seconds` in `english/outputs/pipeline_summary.json`). An earlier run of the
+Spanish pipeline (identical code, same seeds, full parallelism `n_jobs=-1`) measured
+~19 minutes, of which ~8.4 min were RandomForest's
 hyperparameter search (8 combinations) — by far the slowest step, since it uses exact
 splits instead of histograms (see the note in `src/cmapss/modeling.py`) — despite trying
 fewer combinations than XGBoost or LightGBM (20 each, both completed in ~4 and ~3
