@@ -333,9 +333,9 @@ python train.py
 Un único comando ejecuta todo el pipeline: carga, ablaciones por CV, búsqueda de
 hiperparámetros, entrenamiento final, evaluación en test, bloque estadístico, guardado
 de modelos (con verificación de que se recargan y reproducen el RMSE de test) y figuras.
-La ejecución que generó las cifras actuales de `outputs/` tardó **~25 minutos en CPU**
-(1514.5 s, campo `tiempo_total_segundos` de `outputs/resumen_pipeline.json`). En una
-ejecución anterior se midieron ~19 minutos, de los cuales ~8.4 min fueron la búsqueda de hiperparámetros de RandomForest (8 combinaciones) — con
+Tiempo en CPU: `outputs/resumen_pipeline.json` registra **1514.5 s (~25 minutos)**
+(campo `tiempo_total_segundos`); en otra medición se registraron ~19 minutos, de los
+cuales ~8.4 min fueron la búsqueda de hiperparámetros de RandomForest (8 combinaciones) — con
 diferencia el paso más lento del pipeline por usar split exacto en vez de histograma
 (ver nota en `src/cmapss/modeling.py`) — pese a probar menos combinaciones que XGBoost o
 LightGBM (20 cada uno, ambos completados en ~4 y ~3 min respectivamente). El tiempo total

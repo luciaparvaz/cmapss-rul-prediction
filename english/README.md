@@ -330,12 +330,12 @@ python train.py
 
 A single command runs the whole pipeline: loading, CV ablations, hyperparameter search,
 final training, test evaluation, statistical block, model saving (with verification that
-they reload and reproduce the test RMSE), and figures. The run that produced the current
-Spanish `outputs/` took **~25 minutes on CPU** (1514.5 s, `tiempo_total_segundos` in
-`outputs/resumen_pipeline.json`); this English version's run took ~43 minutes (2557.3 s,
-`total_time_seconds` in `english/outputs/pipeline_summary.json`). An earlier run of the
-Spanish pipeline (identical code, same seeds, full parallelism `n_jobs=-1`) measured
-~19 minutes, of which ~8.4 min were RandomForest's
+they reload and reproduce the test RMSE), and figures. CPU time: the Spanish
+`outputs/resumen_pipeline.json` records **1514.5 s (~25 minutes)**
+(`tiempo_total_segundos`), and this English version's
+`english/outputs/pipeline_summary.json` records 2557.3 s (~43 minutes,
+`total_time_seconds`). Another measurement of the Spanish pipeline (identical code, same
+seeds, full parallelism `n_jobs=-1`) recorded ~19 minutes, of which ~8.4 min were RandomForest's
 hyperparameter search (8 combinations) — by far the slowest step, since it uses exact
 splits instead of histograms (see the note in `src/cmapss/modeling.py`) — despite trying
 fewer combinations than XGBoost or LightGBM (20 each, both completed in ~4 and ~3
